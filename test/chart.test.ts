@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeSaju, describeChart, chartView, toOrreryInput, InputError, asOfDate, seunOf, strengthOf } from "../src/chart.js";
+import { completedCombos, computeSaju, describeChart, chartView, fixHyeong, openSamhapPairs, toOrreryInput, InputError, asOfDate, seunOf, strengthOf } from "../src/chart.js";
 
 // 기준일을 고정해 스냅샷이 날짜에 따라 바뀌지 않게 한다
 const AS_OF = asOfDate("2026-10-29");
@@ -88,5 +88,24 @@ describe("해외 출생 시주", () => {
     const saju = computeSaju({ date: "1985-07-04", time: "14:10", gender: "F", jasiMethod: "unified", place });
     // @orrery/core 0.4.5는 庚午였다. 0.5.0은 진태양시로 이미 보정한 입력에 한국식 30분 보정(trueSolarTime 옵션 참고)을 더하지 않아 辛未가 된다.
     expect(saju.pillars[0]!.pillar.ganzi).toBe("辛未");
+  });
+});
+
+describe("관계 교정과 합 계산", () => {
+  it("丑戌未 형은 持勢, 子卯 형은 無禮로 낸다", () => {
+    const hyeong = [{ type: "刑", detail: "無禮" }] as never;
+    expect(fixHyeong(hyeong, "未", "丑")[0]!.detail).toBe("持勢");
+    expect(fixHyeong([{ type: "刑", detail: "相刑" }] as never, "子", "卯")[0]!.detail).toBe("無禮");
+    expect(fixHyeong([{ type: "刑", detail: "無恩" }] as never, "寅", "巳")[0]!.detail).toBe("無恩");
+    expect(fixHyeong([{ type: "沖", detail: null }] as never, "丑", "未")[0]!.detail).toBeNull();
+  });
+  it("원국 巳·丑에 운의 酉가 들어오면 巳酉丑 삼합 완성", () => {
+    expect(completedCombos(["亥", "丑", "巳", "午"], ["酉"]).join()).toContain("巳酉丑 三合(金) 완성");
+    expect(completedCombos(["亥", "丑", "巳", "午"], ["卯"]).join()).not.toContain("巳酉丑");
+    expect(completedCombos(["巳", "酉", "丑"], ["酉"])).toEqual([]);
+  });
+  it("왕지 없는 양 끝 짝을 유파 차이로 표시한다", () => {
+    expect(openSamhapPairs(["巳", "丑"]).join()).toContain("왕지 酉");
+    expect(openSamhapPairs(["巳", "酉"])).toEqual([]);
   });
 });

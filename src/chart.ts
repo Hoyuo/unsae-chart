@@ -91,12 +91,61 @@ function countElements(saju: SajuResult) {
 
 const fmtRel = (r: RelationResult) => `${r.type}${r.detail ? `(${ELEMENT_HANJA[r.detail] ?? r.detail})` : ""}`;
 
+/**
+ * @orrery/core 0.5.0은 丑戌未 형을 無禮로, 子卯 형을 相刑으로 낸다. 전통 분류는 丑戌未가 持勢, 子卯가 無禮다.
+ * 寅巳申(無恩)과 자형은 맞으므로 이 둘만 바로잡는다.
+ */
+export function fixHyeong(rs: RelationResult[], a: string, b: string): RelationResult[] {
+  const pair = new Set([a, b]);
+  const label = pair.has("子") && pair.has("卯") ? "無禮" : a !== b && [...pair].every((x) => "丑戌未".includes(x)) ? "持勢" : null;
+  return label ? rs.map((r) => (r.type === "刑" ? { ...r, detail: label } : r)) : rs;
+}
+
+/** 지지 관계의 이름을 바로잡은 analyzePillarRelations */
+function pillarRelations(a: string, b: string) {
+  const r = analyzePillarRelations(a, b);
+  return { ...r, branch: fixHyeong(r.branch, a[1]!, b[1]!) };
+}
+
+/** 삼합은 가운데 글자가 왕지다 */
+const SAMHAP: [string, string][] = [["申子辰", "水"], ["亥卯未", "木"], ["寅午戌", "火"], ["巳酉丑", "金"]];
+const BANGHAP: [string, string][] = [["寅卯辰", "木"], ["巳午未", "火"], ["申酉戌", "金"], ["亥子丑", "水"]];
+
+/** 원국에 운의 글자를 더해 완성되는 삼합·방합. 운의 글자가 들어가야 완성되는 것만 */
+export function completedCombos(natal: string[], extra: string[]) {
+  const have = new Set(natal);
+  const out: string[] = [];
+  for (const [names, list] of [["三合", SAMHAP], ["方合", BANGHAP]] as const)
+    for (const [set, elem] of list) {
+      const letters = [...set];
+      const fromLuck = letters.filter((x) => !have.has(x));
+      if (fromLuck.length && fromLuck.every((x) => extra.includes(x))) out.push(`${set} ${names}(${elem}) 완성: ${fromLuck.join("·")}이(가) 들어와 원국 ${letters.filter((x) => have.has(x)).join("·")}과 묶임`);
+    }
+  return out;
+}
+
+/** 원국의 두 글자가 왕지 없이 삼합의 양 끝만 이룬 짝. 반합으로 볼지는 유파마다 다르다 */
+export function openSamhapPairs(natal: string[]) {
+  const have = new Set(natal);
+  return SAMHAP.flatMap(([set, elem]) => {
+    const [a, mid, b] = [...set] as [string, string, string];
+    return have.has(a) && have.has(b) && !have.has(mid) ? [`${a}${b}: ${set} ${elem}국의 왕지 ${mid}이(가) 빠진 짝 (반합으로 볼지는 유파마다 다름)`] : [];
+  });
+}
+
+/** 간지 하나의 천간이 원국의 같은 글자 둘 이상과 합하려는 쟁합 */
+export function jaenghap(ganzi: string, saju: SajuResult, label: string) {
+  const hits = saju.pillars.filter((p) => !isUnknown(p.pillar.ganzi) && analyzePillarRelations(ganzi, p.pillar.ganzi).stem.some((r) => r.type === "合"));
+  return hits.length >= 2 ? [`${label} ${ganzi[0]}: 원국 ${hits.map((p) => p.pillar.stem).join("·")} ${hits.length}개와 합하려는 쟁합 (합의 힘이 나뉜다)`] : [];
+}
+
 function listRelations(saju: SajuResult) {
   const rel: string[] = [];
   for (const [key, pair] of saju.relations.pairs) {
     const [a, b] = key.split(",").map((n) => PILLAR_NAMES[Number(n)]);
     for (const r of pair.stem) rel.push(`${a}-${b} 천간 ${fmtRel(r)}`);
-    for (const r of pair.branch) rel.push(`${a}-${b} 지지 ${fmtRel(r)}`);
+    const [bi, bj] = key.split(",").map((n) => saju.pillars[Number(n)]!.pillar.branch);
+    for (const r of fixHyeong(pair.branch, bi!, bj!)) rel.push(`${a}-${b} 지지 ${fmtRel(r)}`);
   }
   for (const r of [...saju.relations.triple, ...saju.relations.directional]) rel.push(fmtRel(r));
   return rel;
@@ -140,7 +189,7 @@ function relationsWithNatal(ganzi: string, saju: SajuResult) {
   const out: string[] = [];
   saju.pillars.forEach((p, i) => {
     if (isUnknown(p.pillar.ganzi)) return;
-    const r = analyzePillarRelations(ganzi, p.pillar.ganzi);
+    const r = pillarRelations(ganzi, p.pillar.ganzi);
     for (const x of r.stem) out.push(`${PILLAR_NAMES[i]} 천간 ${ganzi[0]}-${p.pillar.stem} ${fmtRel(x)}`);
     for (const x of r.branch) out.push(`${PILLAR_NAMES[i]} 지지 ${ganzi[1]}-${p.pillar.branch} ${fmtRel(x)}`);
   });
@@ -148,7 +197,7 @@ function relationsWithNatal(ganzi: string, saju: SajuResult) {
 }
 
 function relationsBetween(a: string, b: string, label: string) {
-  const r = analyzePillarRelations(a, b);
+  const r = pillarRelations(a, b);
   return [
     ...r.stem.map((x) => `${label} 천간 ${a[0]}-${b[0]} ${fmtRel(x)}`),
     ...r.branch.map((x) => `${label} 지지 ${a[1]}-${b[1]} ${fmtRel(x)}`),
@@ -229,7 +278,7 @@ function relationLines(saju: SajuResult) {
     const [i, j] = key.split(",").map(Number) as [number, number];
     const [a, b] = [saju.pillars[i]!.pillar, saju.pillars[j]!.pillar];
     for (const r of pair.stem) lines.push(`${PILLAR_NAMES[i]!.replace("주", "간")}-${PILLAR_NAMES[j]!.replace("주", "간")} ${a.stem}${b.stem} ${fmtRel(r)}`);
-    for (const r of pair.branch) lines.push(`${PILLAR_NAMES[i]!.replace("주", "지")}-${PILLAR_NAMES[j]!.replace("주", "지")} ${a.branch}${b.branch} ${fmtRel(r)}`);
+    for (const r of fixHyeong(pair.branch, a.branch, b.branch)) lines.push(`${PILLAR_NAMES[i]!.replace("주", "지")}-${PILLAR_NAMES[j]!.replace("주", "지")} ${a.branch}${b.branch} ${fmtRel(r)}`);
   }
   for (const r of [...saju.relations.triple, ...saju.relations.directional]) lines.push(fmtRel(r));
   return lines;
@@ -237,7 +286,7 @@ function relationLines(saju: SajuResult) {
 
 /** 간지 둘 사이의 천간·지지 관계를 "천간 丙-乙 沖 / 지지 午-巳 …" 꼴로. 없으면 "없음" */
 function pairRelation(a: string, b: string) {
-  const r = analyzePillarRelations(a, b);
+  const r = pillarRelations(a, b);
   const out = [...r.stem.map((x) => `천간 ${a[0]}-${b[0]} ${fmtRel(x)}`), ...r.branch.map((x) => `지지 ${a[1]}-${b[1]} ${fmtRel(x)}`)];
   return out.length ? out.join(", ") : "없음";
 }
@@ -297,6 +346,12 @@ export function describeChart(saju: SajuResult, asOf: AsOf = asOfDate()) {
     lines.push(`현재 대운 ${cur.ganzi} ↔ 원국`, ...rows);
   } else lines.push("없음");
 
+  const next = saju.daewoon[curIdx + 1];
+  if (next) {
+    const rows = pillars.map((p, i) => `${PILLAR_NAMES[i]} ${isUnknown(p.pillar.ganzi) ? "시간 미상" : `${p.pillar.ganzi}: ${pairRelation(next.ganzi, p.pillar.ganzi)}`}`);
+    lines.push("", "[다음 대운 관계]", `${next.startDate.getUTCFullYear()}년부터 ${next.ganzi} ↔ 원국`, ...rows);
+  }
+
   const seun = seunOf(saju, asOf);
   lines.push("", "[세운]");
   for (const y of seun) lines.push(`${y.year}년(${y.label}) ${y.ganzi} | 천간 ${y.stemSipsin} / 지지 ${y.branchSipsin} | 12운성 ${y.unseong}`);
@@ -306,6 +361,18 @@ export function describeChart(saju: SajuResult, asOf: AsOf = asOfDate()) {
     lines.push(`${y.year} ${y.ganzi} ↔ ` + pillars.map((p, i) => `${PILLAR_NAMES[i]} ${isUnknown(p.pillar.ganzi) ? "시간 미상" : `${p.pillar.ganzi}: ${pairRelation(y.ganzi, p.pillar.ganzi)}`}`).join(" / "));
     lines.push(`${y.year} ${y.ganzi} ↔ ${cur ? `현재 대운 ${cur.ganzi}: ${pairRelation(y.ganzi, cur.ganzi)}` : "현재 대운 없음"}`);
   }
+
+  const natalBranches = pillars.filter((p) => !isUnknown(p.pillar.ganzi)).map((p) => p.pillar.branch);
+  const combo = [
+    ...openSamhapPairs(natalBranches).map((x) => `원국 ${x}`),
+    ...(cur ? completedCombos(natalBranches, [cur.ganzi[1]!]).map((x) => `현재 대운 ${cur.ganzi}: ${x}`) : []),
+    ...(next ? completedCombos(natalBranches, [next.ganzi[1]!]).map((x) => `다음 대운 ${next.ganzi}: ${x}`) : []),
+    ...seun.flatMap((y) => completedCombos(natalBranches, [y.ganzi[1]!, ...(cur ? [cur.ganzi[1]!] : [])]).map((x) => `${y.year} ${y.ganzi}: ${x}`)),
+    ...seun.flatMap((y) => jaenghap(y.ganzi, saju, `${y.year} 세운`)),
+    ...(cur ? jaenghap(cur.ganzi, saju, "현재 대운") : []),
+    ...(next ? jaenghap(next.ganzi, saju, "다음 대운") : []),
+  ];
+  lines.push("", "[삼합·방합·쟁합]", ...(combo.length ? [...new Set(combo)] : ["없음"]));
   return lines.join("\n");
 }
 
@@ -373,6 +440,8 @@ export function sajuFacts(saju: SajuResult, asOf: AsOf, chartText: string): Fact
   const cur = saju.daewoon[currentDaewoonIndex(saju.daewoon, asOf.year)];
   const years = [asOf.year, asOf.year + 1].map(getYearGanzi);
   if (cur) known.forEach((g) => between(cur.ganzi, g));
+  const nextLuck = saju.daewoon[currentDaewoonIndex(saju.daewoon, asOf.year) + 1];
+  if (nextLuck) known.forEach((g) => between(nextLuck.ganzi, g));
   for (const y of years) {
     known.forEach((g) => between(y, g));
     if (cur) between(y, cur.ganzi);

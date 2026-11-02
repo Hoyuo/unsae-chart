@@ -78,6 +78,10 @@ export async function computeNatal(birth: BirthInput, place: Place, asOf: AsOf):
     modes[MODES[signIndex(p.sign) % 3]!]!++;
   }
 
+  // 토성 이후 행성은 또래가 같은 별자리를 공유한다. 개인의 쏠림은 개인 행성으로 따로 본다
+  const personal = Object.fromEntries(ELEMENTS.map((e) => [e, 0]));
+  for (const p of planets) if (PERSONAL.includes(p.id)) personal[ELEMENTS[signIndex(p.sign) % 4]!]!++;
+
   const aspects = chart.aspects
     .filter((a) => MAIN_PLANETS.includes(a.planet1) && MAIN_PLANETS.includes(a.planet2))
     .sort((a, b) => a.orb - b.orb);
@@ -142,6 +146,7 @@ export async function computeNatal(birth: BirthInput, place: Place, asOf: AsOf):
     "",
     "[원소·모드]",
     `${ELEMENTS.map((e) => `${e} ${elements[e]}`).join(" / ")} — ${MODES.map((m) => `${m} ${modes[m]}`).join(" / ")} (태양~명왕성 10행성 기준)`,
+    `개인 행성(태양·달·수성·금성·화성) 기준: ${ELEMENTS.map((e) => `${e} ${personal[e]}`).join(" / ")}`,
     "",
     "[트랜짓]",
     ...transitData.map(
