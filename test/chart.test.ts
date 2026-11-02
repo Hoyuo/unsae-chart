@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { aspectBetween } from "../src/natal.js";
+import { ziweiBirthTime } from "../src/ziwei.js";
 import { completedCombos, computeSaju, describeChart, chartView, fixHyeong, openSamhapPairs, toOrreryInput, InputError, asOfDate, seunOf, strengthOf } from "../src/chart.js";
 
 // 기준일을 고정해 스냅샷이 날짜에 따라 바뀌지 않게 한다
@@ -107,5 +109,48 @@ describe("관계 교정과 합 계산", () => {
   it("왕지 없는 양 끝 짝을 유파 차이로 표시한다", () => {
     expect(openSamhapPairs(["巳", "丑"]).join()).toContain("왕지 酉");
     expect(openSamhapPairs(["巳", "酉"])).toEqual([]);
+  });
+});
+
+describe("트랜짓 애스펙트", () => {
+  it("합·대립·삼각·육각·사각을 각거리대로 낸다", () => {
+    expect(aspectBetween(100, 100)?.en).toMatch(/conjunction/i);
+    expect(aspectBetween(280, 100)?.en).toMatch(/opposition/i);
+    expect(aspectBetween(220, 100)?.en).toMatch(/trine/i);
+    expect(aspectBetween(1, 359)?.en).toMatch(/conjunction/i);
+    expect(aspectBetween(190, 100)?.en).toMatch(/square/i);
+    expect(aspectBetween(145, 100)).toBeNull();
+  });
+});
+
+describe("세운의 합", () => {
+  it("그 해의 글자가 기여한 합만 그 해의 사건이다", () => {
+    expect(completedCombos(["亥", "子"], ["午", "丑"], "午")).toEqual([]);
+    expect(completedCombos(["巳", "丑"], ["酉", "午"], "酉").join()).toContain("巳酉丑");
+  });
+});
+
+describe("자미두수 시각은 사주와 같은 경계를 쓴다", () => {
+  const t = (time: string, jasi?: string, tz: string | null = "Asia/Seoul", date = "1990-05-12") => {
+    const r = ziweiBirthTime(date, time, tz, jasi);
+    return `${r.month}/${r.day} ${r.hour}:${String(r.minute).padStart(2, "0")}`;
+  };
+  it("한국 출생은 30분 당긴다", () => {
+    expect(t("23:20")).toBe("5/12 22:50"); // 사주도 亥시
+    expect(t("10:15")).toBe("5/12 9:45");
+    expect(t("01:30")).toBe("5/12 1:00"); // 丑시 시작
+  });
+  it("子시 날짜는 자시법을 따른다", () => {
+    expect(t("23:40")).toBe("5/13 0:10"); // 통자시는 다음 날
+    expect(t("23:40", "split")).toBe("5/12 23:10"); // 야자시는 그날 밤
+    expect(t("00:10")).toBe("5/12 0:10");
+    expect(t("01:10")).toBe("5/12 0:59"); // 아직 子시
+    expect(t("23:50", undefined, "Asia/Seoul", "1990-12-31")).toBe("1/1 0:20");
+  });
+  it("해외 출생은 그대로 둔다", () => {
+    expect(t("23:20", undefined, "America/New_York")).toBe("5/12 23:20");
+  });
+  it("기준 출생의 자미두수가 亥시 기준으로 계산된다", () => {
+    expect(ziweiBirthTime("1990-05-12", "23:20", "Asia/Seoul").hour).toBe(22);
   });
 });

@@ -51,9 +51,8 @@ function houseOf(longitude: number, chart: NatalChart): number | null {
   return null;
 }
 
-function aspectBetween(a: number, b: number): { name: string; en: string; orb: number } | null {
-  const diff = Math.abs(((a - b + 540) % 360) - 180); // 0~180 → 각거리 = 180 - diff
-  const angle = 180 - diff;
+export function aspectBetween(a: number, b: number): { name: string; en: string; orb: number } | null {
+  const angle = Math.abs(((a - b + 540) % 360) - 180); // 두 경도의 각거리 0~180
   for (const [target, name, en] of MAJOR_ASPECTS) {
     const orb = Math.abs(angle - target);
     if (orb <= TRANSIT_ORB) return { name, en, orb: Math.round(orb * 10) / 10 };

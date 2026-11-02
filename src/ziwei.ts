@@ -22,10 +22,29 @@ const starLabel = (s: { name: string; brightness: string; siHua: string }) => {
 type Palace = ZiweiChart["palaces"][string];
 const starsOf = (p: Palace) => (p.stars.length ? p.stars.map(starLabel).join(" ") : "");
 
+/**
+ * 한국 출생은 사주와 같은 시 경계를 쓴다(子시 23:30~01:30). createChart는 정시 경계를 쓰므로 30분 당겨 넘긴다.
+ * 자시 날짜도 사주의 자시법을 따른다: 통자시는 23:30부터 다음 날, 야자시는 그날의 밤 子시.
+ * 해외 출생은 라이브러리에 맡긴다.
+ */
+export function ziweiBirthTime(date: string, time: string, timezone: string | null | undefined, jasiMethod?: string) {
+  const [year, month, day] = date.split("-").map(Number) as [number, number, number];
+  const [hour, minute] = time.split(":").map(Number) as [number, number];
+  if (timezone && timezone !== "Asia/Seoul") return { year, month, day, hour, minute };
+  const total = hour * 60 + minute;
+  if (total >= 23 * 60 + 30) {
+    if (jasiMethod === "split") return { year, month, day, hour: 23, minute: minute - 30 };
+    const next = new Date(Date.UTC(year, month - 1, day + 1));
+    return { year: next.getUTCFullYear(), month: next.getUTCMonth() + 1, day: next.getUTCDate(), hour: 0, minute: minute - 30 };
+  }
+  if (total < 90) return { year, month, day, hour: 0, minute: total >= 60 ? 59 : minute }; // 그날 새벽의 子시
+  const moved = total - 30;
+  return { year, month, day, hour: Math.floor(moved / 60), minute: moved % 60 };
+}
+
 export function computeZiwei(birth: BirthInput, place: Place, asOf: AsOf): ZiweiResult {
-  const [year, month, day] = birth.date.split("-").map(Number) as [number, number, number];
   // 자미두수는 출생 시가 필수라 시간 미상이면 이 함수를 부르지 않는다(pipeline). 호출되면 정오로 계산한다.
-  const [hour, minute] = birth.time ? (birth.time.split(":").map(Number) as [number, number]) : [12, 0];
+  const { year, month, day, hour, minute } = ziweiBirthTime(birth.date, birth.time ?? "12:30", place.timezone, birth.jasiMethod);
   const chart: ZiweiChart = createChart(year, month, day, hour, minute, birth.gender === "M", place.timezone, place.lon);
 
   const palaces = Object.values(chart.palaces);

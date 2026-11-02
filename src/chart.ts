@@ -112,14 +112,14 @@ const SAMHAP: [string, string][] = [["申子辰", "水"], ["亥卯未", "木"], 
 const BANGHAP: [string, string][] = [["寅卯辰", "木"], ["巳午未", "火"], ["申酉戌", "金"], ["亥子丑", "水"]];
 
 /** 원국에 운의 글자를 더해 완성되는 삼합·방합. 운의 글자가 들어가야 완성되는 것만 */
-export function completedCombos(natal: string[], extra: string[]) {
+export function completedCombos(natal: string[], extra: string[], must?: string) {
   const have = new Set(natal);
   const out: string[] = [];
   for (const [names, list] of [["三合", SAMHAP], ["方合", BANGHAP]] as const)
     for (const [set, elem] of list) {
       const letters = [...set];
       const fromLuck = letters.filter((x) => !have.has(x));
-      if (fromLuck.length && fromLuck.every((x) => extra.includes(x))) out.push(`${set} ${names}(${elem}) 완성: ${fromLuck.join("·")}이(가) 들어와 원국 ${letters.filter((x) => have.has(x)).join("·")}과 묶임`);
+      if (fromLuck.length && fromLuck.every((x) => extra.includes(x)) && (!must || fromLuck.includes(must))) out.push(`${set} ${names}(${elem}) 완성: ${fromLuck.join("·")}이(가) 들어와 원국 ${letters.filter((x) => have.has(x)).join("·")}과 묶임`);
     }
   return out;
 }
@@ -168,8 +168,8 @@ function listSals(saju: SajuResult) {
   return sal;
 }
 
-const currentDaewoonIndex = (daewoon: DaewoonItem[], year: number) =>
-  daewoon.findLastIndex((d) => d.startDate.getUTCFullYear() <= year);
+/** 기준일에 이미 시작한 마지막 대운. 연도만 보면 시작 전 몇 달을 새 대운으로 잘못 본다 */
+const currentDaewoonIndex = (daewoon: DaewoonItem[], date: string) => daewoon.findLastIndex((d) => d.startDate.toISOString().slice(0, 10) <= date);
 
 // ── 십신·관계 (orrery 함수로 계산) ────────────────────────
 const SUPPORT = new Set(["比肩", "劫財", "正印", "偏印"]); // 일간을 돕는 십신 (비겁·인성)
@@ -207,7 +207,7 @@ function relationsBetween(a: string, b: string, label: string) {
 /** 세운 (기준 연도·다음 연도) */
 export function seunOf(saju: SajuResult, asOf: AsOf): SeunView[] {
   const dayStem = saju.pillars[1]!.pillar.stem;
-  const cur = saju.daewoon[currentDaewoonIndex(saju.daewoon, asOf.year)];
+  const cur = saju.daewoon[currentDaewoonIndex(saju.daewoon, asOf.date)];
   return [asOf.year, asOf.year + 1].map((year, i) => {
     const ganzi = getYearGanzi(year);
     const [stem, branch] = [ganzi[0]!, ganzi[1]!];
@@ -333,7 +333,7 @@ export function describeChart(saju: SajuResult, asOf: AsOf = asOfDate()) {
   lines.push("", "[신살]", listOrNone(listSals(saju)));
   lines.push("", "[공망]", saju.gongmang.branches.join("") || "없음");
 
-  const curIdx = currentDaewoonIndex(saju.daewoon, asOf.year);
+  const curIdx = currentDaewoonIndex(saju.daewoon, asOf.date);
   lines.push("", "[대운]");
   saju.daewoon.forEach((dw, i) => {
     lines.push(`${dw.age}세~ ${dw.startDate.getUTCFullYear()}년 ${dw.ganzi} ${dw.stemSipsin}/${dw.branchSipsin} ${dw.unseong}${i === curIdx ? " ← 현재" : ""}`);
@@ -367,7 +367,7 @@ export function describeChart(saju: SajuResult, asOf: AsOf = asOfDate()) {
     ...openSamhapPairs(natalBranches).map((x) => `원국 ${x}`),
     ...(cur ? completedCombos(natalBranches, [cur.ganzi[1]!]).map((x) => `현재 대운 ${cur.ganzi}: ${x}`) : []),
     ...(next ? completedCombos(natalBranches, [next.ganzi[1]!]).map((x) => `다음 대운 ${next.ganzi}: ${x}`) : []),
-    ...seun.flatMap((y) => completedCombos(natalBranches, [y.ganzi[1]!, ...(cur ? [cur.ganzi[1]!] : [])]).map((x) => `${y.year} ${y.ganzi}: ${x}`)),
+    ...seun.flatMap((y) => completedCombos(natalBranches, [y.ganzi[1]!, ...(cur ? [cur.ganzi[1]!] : [])], y.ganzi[1]!).map((x) => `${y.year} ${y.ganzi}: ${x}`)),
     ...seun.flatMap((y) => jaenghap(y.ganzi, saju, `${y.year} 세운`)),
     ...(cur ? jaenghap(cur.ganzi, saju, "현재 대운") : []),
     ...(next ? jaenghap(next.ganzi, saju, "다음 대운") : []),
@@ -378,7 +378,7 @@ export function describeChart(saju: SajuResult, asOf: AsOf = asOfDate()) {
 
 // ── 화면용 구조화 데이터 ──────────────────────────────────
 export function chartView(saju: SajuResult, asOf: AsOf = asOfDate()): ChartView {
-  const curIdx = currentDaewoonIndex(saju.daewoon, asOf.year);
+  const curIdx = currentDaewoonIndex(saju.daewoon, asOf.date);
   return {
     gender: saju.input.gender,
     unknownTime: !!saju.input.unknownTime,
@@ -437,10 +437,10 @@ export function sajuFacts(saju: SajuResult, asOf: AsOf, chartText: string): Fact
   }
   // 현재 대운·올해·내년 세운 ↔ 원국, 세운 ↔ 현재 대운
   const known = saju.pillars.filter((p) => !isUnknown(p.pillar.ganzi)).map((p) => p.pillar.ganzi);
-  const cur = saju.daewoon[currentDaewoonIndex(saju.daewoon, asOf.year)];
+  const cur = saju.daewoon[currentDaewoonIndex(saju.daewoon, asOf.date)];
   const years = [asOf.year, asOf.year + 1].map(getYearGanzi);
   if (cur) known.forEach((g) => between(cur.ganzi, g));
-  const nextLuck = saju.daewoon[currentDaewoonIndex(saju.daewoon, asOf.year) + 1];
+  const nextLuck = saju.daewoon[currentDaewoonIndex(saju.daewoon, asOf.date) + 1];
   if (nextLuck) known.forEach((g) => between(nextLuck.ganzi, g));
   for (const y of years) {
     known.forEach((g) => between(y, g));
