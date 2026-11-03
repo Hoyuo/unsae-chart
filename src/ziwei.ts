@@ -5,6 +5,7 @@ import { createChart, calculateLiunian, getDaxianList } from "@orrery/core/ziwei
 import type { ZiweiChart } from "@orrery/core/types";
 import type { BirthInput, Facts, Place, ZiweiView } from "./types.js";
 import { getYearGanzi } from "@orrery/core/pillars";
+import { adjustBirthInputToKstWallClock } from "@orrery/core/timezone";
 import type { AsOf } from "./chart.js";
 
 export interface ZiweiResult {
@@ -28,9 +29,18 @@ const starsOf = (p: Palace) => (p.stars.length ? p.stars.map(starLabel).join(" "
  * 해외 출생은 라이브러리에 맡긴다.
  */
 export function ziweiBirthTime(date: string, time: string, timezone: string | null | undefined, jasiMethod?: string) {
-  const [year, month, day] = date.split("-").map(Number) as [number, number, number];
-  const [hour, minute] = time.split(":").map(Number) as [number, number];
-  if (timezone && timezone !== "Asia/Seoul") return { year, month, day, hour, minute };
+  const [y0, m0, d0] = date.split("-").map(Number) as [number, number, number];
+  const [h0, min0] = time.split(":").map(Number) as [number, number];
+  if (timezone && timezone !== "Asia/Seoul") return { year: y0, month: m0, day: d0, hour: h0, minute: min0 };
+  // 서머타임·옛 표준시(1948~61, 1987~88) 출생은 사주처럼 KST(+9) 벽시계로 바꾼 뒤 경계를 잰다
+  const kst = adjustBirthInputToKstWallClock({ year: y0, month: m0, day: d0, hour: h0, minute: min0, gender: "M" });
+  return toSeoulWallClock(shiftToZiweiHour(kst, jasiMethod));
+}
+
+type WallClock = { year: number; month: number; day: number; hour: number; minute: number };
+
+/** KST 벽시계 기준으로 사주의 시 경계를 자미두수의 정시 경계로 옮긴다 */
+function shiftToZiweiHour({ year, month, day, hour, minute }: WallClock, jasiMethod?: string): WallClock {
   const total = hour * 60 + minute;
   if (total >= 23 * 60 + 30) {
     if (jasiMethod === "split") return { year, month, day, hour: 23, minute: minute - 30 };
@@ -40,6 +50,20 @@ export function ziweiBirthTime(date: string, time: string, timezone: string | nu
   if (total < 90) return { year, month, day, hour: 0, minute: total >= 60 ? 59 : minute }; // 그날 새벽의 子시
   const moved = total - 30;
   return { year, month, day, hour: Math.floor(moved / 60), minute: moved % 60 };
+}
+
+const seoulFormat = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Asia/Seoul", hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric",
+});
+
+/**
+ * createChart는 받은 시각을 서울 벽시계로 보고 다시 KST로 바꾼다. 두 번 보정되지 않게 KST 시각을 서울 벽시계로 되돌려 넘긴다.
+ * 평소에는 그대로이고, 서머타임 기간에만 값이 달라진다.
+ */
+function toSeoulWallClock(kst: WallClock): WallClock {
+  const utc = Date.UTC(kst.year, kst.month - 1, kst.day, kst.hour, kst.minute) - 9 * 3600_000;
+  const p = Object.fromEntries(seoulFormat.formatToParts(new Date(utc)).map((x) => [x.type, Number(x.value)]));
+  return { year: p.year!, month: p.month!, day: p.day!, hour: p.hour!, minute: p.minute! };
 }
 
 export function computeZiwei(birth: BirthInput, place: Place, asOf: AsOf): ZiweiResult {

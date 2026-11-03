@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { aspectBetween } from "../src/natal.js";
 import { ziweiBirthTime } from "../src/ziwei.js";
+import { adjustBirthInputToKstWallClock } from "@orrery/core/timezone";
 import { completedCombos, computeSaju, describeChart, chartView, fixHyeong, openSamhapPairs, toOrreryInput, InputError, asOfDate, seunOf, strengthOf } from "../src/chart.js";
 
 // 기준일을 고정해 스냅샷이 날짜에 따라 바뀌지 않게 한다
@@ -149,6 +150,18 @@ describe("자미두수 시각은 사주와 같은 경계를 쓴다", () => {
   });
   it("해외 출생은 그대로 둔다", () => {
     expect(t("23:20", undefined, "America/New_York")).toBe("5/12 23:20");
+  });
+  it("서머타임 출생은 KST로 바꾼 뒤 경계를 잰다", () => {
+    // createChart가 받은 값을 다시 KST로 바꾸므로, 그 결과가 사주와 같은 시여야 한다
+    const k = (date: string, time: string, jasi?: string) => {
+      const r = adjustBirthInputToKstWallClock({ ...ziweiBirthTime(date, time, "Asia/Seoul", jasi), gender: "M" });
+      return `${r.month}/${r.day} ${r.hour}:${String(r.minute).padStart(2, "0")}`;
+    };
+    expect(k("1988-07-01", "00:40")).toBe("7/1 0:10"); // KST 6/30 23:40 → 통자시는 7/1 子시
+    expect(k("1988-07-01", "00:40", "split")).toBe("6/30 23:10"); // 야자시는 6/30 밤
+    expect(k("1988-07-01", "23:40")).toBe("7/1 22:10"); // KST 22:40 亥시
+    expect(k("1987-07-01", "00:10")).toBe("6/30 22:40"); // KST 6/30 23:10 亥시
+    expect(k("1990-05-12", "23:20")).toBe("5/12 22:50"); // 평소에는 그대로
   });
   it("기준 출생의 자미두수가 亥시 기준으로 계산된다", () => {
     expect(ziweiBirthTime("1990-05-12", "23:20", "Asia/Seoul").hour).toBe(22);
