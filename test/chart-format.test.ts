@@ -57,7 +57,7 @@ describe("자미두수 차트 텍스트", () => {
     expect(block.split("\n")[0]).toBe("명궁 戌 / 財帛 午 / 官祿 寅 / 遷移 辰");
     expect(block.split("\n")).toHaveLength(5);
   });
-  it("밝기와 생년사화는 한 괄호에 쉼표로 묶는다", () => expect(z.text).toMatch(/巨門\(廟,化權\)/));
+  it("밝기와 생년사화는 한 괄호에 쉼표로 묶고 생년임을 밝힌다", () => expect(z.text).toMatch(/巨門\(廟,生年化權\)/));
 });
 
 describe("점성술 차트 텍스트", () => {

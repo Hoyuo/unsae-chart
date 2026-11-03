@@ -85,11 +85,12 @@ export async function computeNatal(birth: BirthInput, place: Place, asOf: AsOf):
     .filter((a) => MAIN_PLANETS.includes(a.planet1) && MAIN_PLANETS.includes(a.planet2))
     .sort((a, b) => a.orb - b.orb);
 
-  // 트랜짓: 각 연도 7월 1일 정오 기준 목성·토성 위치, 출생 하우스, 개인 행성·앵글과의 주요 각
+  // 트랜짓: 각 연도 1월 1일·7월 1일 정오 기준 목성·토성 위치, 출생 하우스, 개인 행성·앵글과의 주요 각.
+  // 목성은 한 해 안에 별자리를 바꾸므로 한 장면으로는 상반기·하반기가 섞인다
   interface Transit { id: string; sign: ZodiacSign; degree: number; retro: boolean; house: number | null; hits: { target: string; targetKo: string; ko: string; en: string; orb: number }[] }
-  const transitData: { year: number; label: string; list: Transit[] }[] = [];
-  for (const [i, y] of [asOf.year, asOf.year + 1].entries()) {
-    const t = await calculateNatal({ ...base, year: y, month: 7, day: 1, hour: 12, minute: 0 });
+  const transitData: { year: number; label: string; when: string; list: Transit[] }[] = [];
+  for (const [i, y] of [asOf.year, asOf.year + 1].entries()) for (const month of [1, 7]) {
+    const t = await calculateNatal({ ...base, year: y, month, day: 1, hour: 12, minute: 0 });
     const list: Transit[] = [];
     for (const id of TRANSITING) {
       const tp = t.planets.find((p) => p.id === id)!;
@@ -107,17 +108,21 @@ export async function computeNatal(birth: BirthInput, place: Place, asOf: AsOf):
       }
       list.push({ id, sign: tp.sign, degree: tp.degreeInSign, retro: tp.isRetrograde, house: unknownTime ? null : houseOf(tp.longitude, chart), hits });
     }
-    transitData.push({ year: y, label: i === 0 ? "올해" : "내년", list });
+    transitData.push({ year: y, label: i === 0 ? "올해" : "내년", when: `${month}월 1일`, list });
   }
-  // 화면용(한국어)
-  const transits = transitData.map(({ year, label, list }) => ({
+  // 화면용(한국어). 연도마다 1월·7월 두 장면을 한 목록에
+  const transits = [asOf.year, asOf.year + 1].map((year, i) => ({
     year,
-    label,
-    items: list.map(
-      (t) =>
-        `${planetKo(t.id)} ${signKo(t.sign)} ${deg(t.degree)}${t.house ? `(출생 ${t.house}하우스)` : ""}${t.retro ? " 역행" : ""}` +
-        (t.hits.length ? ` — ${t.hits.map((h) => `출생 ${wa(h.targetKo)} ${h.ko}(오브 ${h.orb}°)`).join(", ")}` : "")
-    ),
+    label: i === 0 ? "올해" : "내년",
+    items: transitData
+      .filter((d) => d.year === year)
+      .flatMap(({ when, list }) =>
+        list.map(
+          (t) =>
+            `${when} ${planetKo(t.id)} ${signKo(t.sign)} ${deg(t.degree)}${t.house ? `(출생 ${t.house}하우스)` : ""}${t.retro ? " 역행" : ""}` +
+            (t.hits.length ? ` — ${t.hits.map((h) => `출생 ${wa(h.targetKo)} ${h.ko}(오브 ${h.orb}°)`).join(", ")}` : "")
+        )
+      ),
   }));
 
   // LLM 입력용 텍스트 (docs/chart_format.md). 행성·별자리·애스펙트는 영문 그대로 쓴다.
@@ -147,14 +152,14 @@ export async function computeNatal(birth: BirthInput, place: Place, asOf: AsOf):
     `${ELEMENTS.map((e) => `${e} ${elements[e]}`).join(" / ")} — ${MODES.map((m) => `${m} ${modes[m]}`).join(" / ")} (태양~명왕성 10행성 기준)`,
     `개인 행성(태양·달·수성·금성·화성) 기준: ${ELEMENTS.map((e) => `${e} ${personal[e]}`).join(" / ")}`,
     "",
-    "[트랜짓]",
+    "[트랜짓] 트랜짓 행성은 그해 하늘의 목성·토성이다. 출생 행성이 아니며, 연도마다 1월 1일(상반기)·7월 1일(하반기) 두 장면이다",
     ...transitData.map(
-      ({ year, label, list }) =>
-        `${year}년(${label}) 7월 1일 기준: ` +
-        list.map((t) => `${t.id} ${t.sign} ${deg(t.degree)}${t.retro ? " 역행" : ""} → ${t.house ? `출생 ${t.house}하우스` : "하우스 계산 불가(시간 미상)"}`).join(" / ")
+      ({ year, label, when, list }) =>
+        `${year}년(${label}) ${when}: ` +
+        list.map((t) => `트랜짓 ${t.id} ${t.sign} ${deg(t.degree)}${t.retro ? " 역행" : ""} → ${t.house ? `출생 ${t.house}하우스` : "하우스 계산 불가(시간 미상)"}`).join(" / ")
     ),
     "트랜짓-출생 행성 주요 애스펙트(합·대립·사각·삼각, 오브 3° 이내): " +
-      (transitData.flatMap(({ year, list }) => list.flatMap((t) => t.hits.map((h) => `${year} ${t.id} ${h.en} 출생 ${h.target} ${h.orb}°`))).join("; ") || "없음"),
+      (transitData.flatMap(({ year, when, list }) => list.flatMap((t) => t.hits.map((h) => `${year} ${when} 트랜짓 ${t.id} ${h.en} 출생 ${h.target} ${h.orb}°`))).join("; ") || "없음"),
   ];
 
   const text = lines.join("\n");

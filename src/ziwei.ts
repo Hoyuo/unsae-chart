@@ -15,9 +15,12 @@ export interface ZiweiResult {
   facts: Facts;
 }
 
-/** 巨門(廟,化權) / 天機(得) / 右弼 / 太陽(化祿) — 밝기와 생년사화는 한 괄호 안에 쉼표로 */
+/**
+ * 巨門(廟,生年化權) / 天機(得) / 右弼 / 太陽(生年化祿) — 밝기와 생년 사화는 한 괄호 안에 쉼표로.
+ * 사화에 "生年"을 붙이는 이유: 해석 모델이 별 괄호의 생년 사화와 [유년] 줄의 그해 사화를 바꿔 쓰는 오류가 가장 많았다(운영 130건 중 74건).
+ */
 const starLabel = (s: { name: string; brightness: string; siHua: string }) => {
-  const tags = [s.brightness, s.siHua].filter(Boolean).join(",");
+  const tags = [s.brightness, s.siHua && `生年${s.siHua}`].filter(Boolean).join(",");
   return `${s.name}${tags ? `(${tags})` : ""}`;
 };
 type Palace = ZiweiChart["palaces"][string];
@@ -98,7 +101,7 @@ export function computeZiwei(birth: BirthInput, place: Place, asOf: AsOf): Ziwei
     `음력 ${chart.lunarYear}년 ${chart.isLeapMonth ? "윤" : ""}${chart.lunarMonth}월 ${chart.lunarDay}일 / 대한 시작 ${chart.daXianStartAge}세`,
     ...(ambiguous ? ["시각 주의: 표준시가 바뀐 밤의 출생이라 자미두수 날짜가 하루 어긋났을 수 있습니다. uncertainties에 적습니다."] : []),
     "",
-    "[12궁]",
+    "[12궁] 별 괄호 안의 生年化祿·化權·化科·化忌는 생년 사화. 그해 사화는 [유년] 줄에만 있다",
   ];
   palaces.forEach((p, i) => {
     if (p.stars.length) return lines.push(`${p.name} ${p.ganZhi} | ${starsOf(p)}`);
@@ -111,7 +114,7 @@ export function computeZiwei(birth: BirthInput, place: Place, asOf: AsOf): Ziwei
   lines.push(`명궁 ${at(ming).zhi} / ${sanfang.slice(1).map(({ palace }) => `${palace.name} ${palace.zhi}`).join(" / ")}`);
   for (const { palace } of sanfang) lines.push(`${palace.name} ${palace.zhi} | ${starsOf(palace) || "주성 없음(공궁)"}`);
 
-  const birthSiHua = palaces.flatMap((p) => p.stars.filter((s) => s.siHua).map((s) => `${s.siHua} ${s.name}(${p.name})`));
+  const birthSiHua = palaces.flatMap((p) => p.stars.filter((s) => s.siHua).map((s) => `生年${s.siHua} ${s.name}(${p.name})`));
   lines.push("", "[생년 사화]", birthSiHua.length ? birthSiHua.join(" / ") : "없음");
 
   lines.push("", "[대한]");
@@ -122,7 +125,7 @@ export function computeZiwei(birth: BirthInput, place: Place, asOf: AsOf): Ziwei
 
   lines.push("", "[유년]");
   for (const { info, label } of liunian) {
-    const sihua = Object.entries(info.siHua).map(([star, hua]) => `${star} ${hua}(${info.siHuaPalaces[hua] ?? "?"})`).join(", ");
+    const sihua = Object.entries(info.siHua).map(([star, hua]) => `${info.year}유년${hua} ${star}(${info.siHuaPalaces[hua] ?? "?"})`).join(", ");
     lines.push(`${info.year}년(${label}) ${info.gan}${info.zhi} | 유년 명궁 ${info.mingGongZhi} = 본명반 ${info.natalPalaceAtMing} | 유년 사화: ${sihua}`);
   }
 
