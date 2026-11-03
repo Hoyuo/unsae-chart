@@ -28,13 +28,18 @@ const starsOf = (p: Palace) => (p.stars.length ? p.stars.map(starLabel).join(" "
  * 자시 날짜도 사주의 자시법을 따른다: 통자시는 23:30부터 다음 날, 야자시는 그날의 밤 子시.
  * 해외 출생은 라이브러리에 맡긴다.
  */
-export function ziweiBirthTime(date: string, time: string, timezone: string | null | undefined, jasiMethod?: string) {
+export function ziweiBirthTime(date: string, time: string, timezone: string | null | undefined, jasiMethod?: string): WallClock & { ambiguous?: boolean } {
   const [y0, m0, d0] = date.split("-").map(Number) as [number, number, number];
   const [h0, min0] = time.split(":").map(Number) as [number, number];
   if (timezone && timezone !== "Asia/Seoul") return { year: y0, month: m0, day: d0, hour: h0, minute: min0 };
   // 서머타임·옛 표준시(1948~61, 1987~88) 출생은 사주처럼 KST(+9) 벽시계로 바꾼 뒤 경계를 잰다
   const kst = adjustBirthInputToKstWallClock({ year: y0, month: m0, day: d0, hour: h0, minute: min0, gender: "M" });
-  return toSeoulWallClock(shiftToZiweiHour(kst, jasiMethod));
+  const target = shiftToZiweiHour(kst, jasiMethod);
+  const wall = toSeoulWallClock(target);
+  // 시계를 되돌린 밤(예: 1954-03-20)은 같은 벽시계가 두 번 있어 createChart가 이른 쪽으로 읽는다. 그때만 표시한다
+  const back = adjustBirthInputToKstWallClock({ ...wall, gender: "M" });
+  const ambiguous = (["year", "month", "day", "hour", "minute"] as const).some((k) => back[k] !== target[k]);
+  return ambiguous ? { ...wall, ambiguous } : wall;
 }
 
 type WallClock = { year: number; month: number; day: number; hour: number; minute: number };
@@ -68,7 +73,7 @@ function toSeoulWallClock(kst: WallClock): WallClock {
 
 export function computeZiwei(birth: BirthInput, place: Place, asOf: AsOf): ZiweiResult {
   // 자미두수는 출생 시가 필수라 시간 미상이면 이 함수를 부르지 않는다(pipeline). 호출되면 정오로 계산한다.
-  const { year, month, day, hour, minute } = ziweiBirthTime(birth.date, birth.time ?? "12:30", place.timezone, birth.jasiMethod);
+  const { year, month, day, hour, minute, ambiguous } = ziweiBirthTime(birth.date, birth.time ?? "12:30", place.timezone, birth.jasiMethod);
   const chart: ZiweiChart = createChart(year, month, day, hour, minute, birth.gender === "M", place.timezone, place.lon);
 
   const palaces = Object.values(chart.palaces);
@@ -89,6 +94,7 @@ export function computeZiwei(birth: BirthInput, place: Place, asOf: AsOf): Ziwei
     "[기본]",
     `성별 ${birth.gender === "M" ? "남" : "여"} / 명궁 ${chart.mingGongZhi} / 신궁 ${chart.shenGongZhi}${shen ? `(${shen.name})` : ""} / 오행국 ${chart.wuXingJu.name}`,
     `음력 ${chart.lunarYear}년 ${chart.isLeapMonth ? "윤" : ""}${chart.lunarMonth}월 ${chart.lunarDay}일 / 대한 시작 ${chart.daXianStartAge}세`,
+    ...(ambiguous ? ["시각 주의: 표준시가 바뀐 밤의 출생이라 자미두수 날짜가 하루 어긋났을 수 있습니다. uncertainties에 적습니다."] : []),
     "",
     "[12궁]",
   ];

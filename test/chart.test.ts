@@ -163,6 +163,11 @@ describe("자미두수 시각은 사주와 같은 경계를 쓴다", () => {
     expect(k("1987-07-01", "00:10")).toBe("6/30 22:40"); // KST 6/30 23:10 亥시
     expect(k("1990-05-12", "23:20")).toBe("5/12 22:50"); // 평소에는 그대로
   });
+  it("표준시를 되돌린 밤의 겹친 시각은 표시한다", () => {
+    expect(ziweiBirthTime("1954-03-20", "23:40", "Asia/Seoul").ambiguous).toBe(true);
+    expect(ziweiBirthTime("1954-03-20", "22:40", "Asia/Seoul").ambiguous).toBeUndefined();
+    expect(ziweiBirthTime("1990-05-12", "23:20", "Asia/Seoul").ambiguous).toBeUndefined();
+  });
   it("기준 출생의 자미두수가 亥시 기준으로 계산된다", () => {
     expect(ziweiBirthTime("1990-05-12", "23:20", "Asia/Seoul").hour).toBe(22);
   });
