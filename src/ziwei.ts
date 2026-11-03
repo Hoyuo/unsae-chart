@@ -38,7 +38,9 @@ export function ziweiBirthTime(date: string, time: string, timezone: string | nu
   const wall = toSeoulWallClock(target);
   // 시계를 되돌린 밤(예: 1954-03-20)은 같은 벽시계가 두 번 있어 createChart가 이른 쪽으로 읽는다. 그때만 표시한다
   const back = adjustBirthInputToKstWallClock({ ...wall, gender: "M" });
-  const ambiguous = (["year", "month", "day", "hour", "minute"] as const).some((k) => back[k] !== target[k]);
+  // 날짜나 시진이 실제로 달라질 때만 알린다. 같은 시진 안에서 분만 다르면 명반이 같다
+  const branch = (t: WallClock) => Math.floor((t.hour + 1) / 2) % 12;
+  const ambiguous = back.year !== target.year || back.month !== target.month || back.day !== target.day || branch(back) !== branch(target);
   return ambiguous ? { ...wall, ambiguous } : wall;
 }
 

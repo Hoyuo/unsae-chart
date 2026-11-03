@@ -167,6 +167,9 @@ describe("자미두수 시각은 사주와 같은 경계를 쓴다", () => {
     expect(ziweiBirthTime("1954-03-20", "23:40", "Asia/Seoul").ambiguous).toBe(true);
     expect(ziweiBirthTime("1954-03-20", "22:40", "Asia/Seoul").ambiguous).toBeUndefined();
     expect(ziweiBirthTime("1990-05-12", "23:20", "Asia/Seoul").ambiguous).toBeUndefined();
+    // 1987·88 서머타임이 끝난 새벽은 겹쳐도 같은 시진이라 알리지 않는다
+    expect(ziweiBirthTime("1987-10-11", "03:10", "Asia/Seoul").ambiguous).toBeUndefined();
+    expect(ziweiBirthTime("1988-10-09", "03:00", "Asia/Seoul").ambiguous).toBeUndefined();
   });
   it("기준 출생의 자미두수가 亥시 기준으로 계산된다", () => {
     expect(ziweiBirthTime("1990-05-12", "23:20", "Asia/Seoul").hour).toBe(22);
