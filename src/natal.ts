@@ -81,8 +81,10 @@ export async function computeNatal(birth: BirthInput, place: Place, asOf: AsOf):
   const personal = Object.fromEntries(ELEMENTS.map((e) => [e, 0]));
   for (const p of planets) if (PERSONAL.includes(p.id)) personal[ELEMENTS[signIndex(p.sign) % 4]!]!++;
 
+  // 시간 미상은 정오의 달로 계산한다. 달은 하루에 ±6.5° 움직여 오브 몇 도짜리 애스펙트는 실제로 없을 수 있으니 뺀다
+  const moonUncertain = (p1: string, p2: string) => unknownTime && (p1 === "Moon" || p2 === "Moon");
   const aspects = chart.aspects
-    .filter((a) => MAIN_PLANETS.includes(a.planet1) && MAIN_PLANETS.includes(a.planet2))
+    .filter((a) => MAIN_PLANETS.includes(a.planet1) && MAIN_PLANETS.includes(a.planet2) && !moonUncertain(a.planet1, a.planet2))
     .sort((a, b) => a.orb - b.orb);
 
   // 트랜짓: 각 연도 1월 1일·7월 1일 정오 기준 목성·토성 위치, 출생 하우스, 개인 행성·앵글과의 주요 각.
@@ -96,6 +98,7 @@ export async function computeNatal(birth: BirthInput, place: Place, asOf: AsOf):
       const tp = t.planets.find((p) => p.id === id)!;
       const hits: Transit["hits"] = [];
       for (const pid of PERSONAL) {
+        if (moonUncertain(pid, "")) continue;
         const np = byId.get(pid);
         const asp = np && aspectBetween(tp.longitude, np.longitude);
         if (asp) hits.push({ target: pid, targetKo: planetKo(pid), ko: asp.name, en: asp.en, orb: asp.orb });
@@ -126,6 +129,8 @@ export async function computeNatal(birth: BirthInput, place: Place, asOf: AsOf):
   }));
 
   // LLM 입력용 텍스트 (docs/chart_format.md). 행성·별자리·애스펙트는 영문 그대로 쓴다.
+  // 하우스 체계는 orrery가 정한다. 위도 66.56° 이상이면 Placidus가 안 되어 Porphyry("O")로 바꿔 계산한다
+  const HOUSE_SYSTEM: Record<string, string> = { P: "Placidus", O: "Porphyry", K: "Koch", W: "Whole Sign", E: "Equal" };
   const NO_TIME = "시간 미상으로 계산 불가";
   const planetText = (p: PlanetPosition) =>
     `${p.id} ${p.sign} ${deg(p.degreeInSign)}${p.house ? ` ${p.house}하우스` : ""}${p.isRetrograde ? " 역행" : ""}${unknownTime && p.id === "Moon" ? " (당일 이동 범위 큼)" : ""}`;
@@ -134,7 +139,7 @@ export async function computeNatal(birth: BirthInput, place: Place, asOf: AsOf):
     `오늘 ${asOf.date} / 올해 ${asOf.year}년 / 내년 ${asOf.year + 1}년`,
     "",
     "[기본]",
-    `출생지 ${place.name} (${place.lat.toFixed(2)}, ${place.lon.toFixed(2)}) / 하우스 Placidus / ${unknownTime ? "시간 미상" : "출생시간 확인됨"}`,
+    `출생지 ${place.name} (${place.lat.toFixed(2)}, ${place.lon.toFixed(2)}) / 하우스 ${HOUSE_SYSTEM[String(chart.houseSystem)] ?? chart.houseSystem ?? "Placidus"} / ${unknownTime ? "시간 미상" : "출생시간 확인됨"}`,
     "",
     "[행성]",
     ...planets.map(planetText),
@@ -146,6 +151,7 @@ export async function computeNatal(birth: BirthInput, place: Place, asOf: AsOf):
     chart.angles ? [...chart.houses].sort((x, y) => x.number - y.number).map((h) => `${h.number} ${h.sign} ${deg(h.degreeInSign)}`).join(" / ") : NO_TIME,
     "",
     "[애스펙트] (오브 작은 순)",
+    ...(unknownTime ? ["달 애스펙트는 시간 미상이라 제외 (당일 달 이동 범위 ±6.5°)"] : []),
     ...(aspects.length ? aspects.map((a) => `${a.planet1} ${a.type} ${a.planet2} ${a.orb.toFixed(1)}°`) : ["없음"]),
     "",
     "[원소·모드]",
@@ -172,9 +178,9 @@ export async function computeNatal(birth: BirthInput, place: Place, asOf: AsOf):
       yearGanzi: { thisYear: getYearGanzi(asOf.year), nextYear: getYearGanzi(asOf.year + 1) },
       unknownTime,
       chartText: text,
-      // 출생 애스펙트 + 트랜짓(목성·토성 ↔ 출생 개인행성·앵글). 영어 표기 그대로 대조한다
+      // 출생 애스펙트 + 트랜짓(목성·토성 ↔ 출생 개인행성·앵글). 영어 표기 그대로 대조한다. 본문에 적은 것만(키론·노드·시간 미상의 달 제외)
       aspects: [
-        ...chart.aspects.map((a) => ({ p1: a.planet1, p2: a.planet2, type: a.type })),
+        ...aspects.map((a) => ({ p1: a.planet1, p2: a.planet2, type: a.type })),
         ...transitData.flatMap(({ list }) => list.flatMap((t) => t.hits.map((h) => ({ p1: t.id, p2: h.target, type: h.en })))),
       ],
     },

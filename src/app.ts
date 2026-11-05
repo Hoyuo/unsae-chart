@@ -9,7 +9,7 @@
 import { filterCities } from "@orrery/core/cities";
 import { Hono } from "hono";
 import { ZodError, type ZodType } from "zod";
-import { InputError, normalizeBirth } from "./chart.js";
+import { InputError, normalizeBirth, normalizePlace } from "./chart.js";
 import { compute } from "./compute.js";
 import { BirthInputSchema, ComputeRequestSchema, SEOUL } from "./types.js";
 
@@ -26,6 +26,12 @@ export function createApp() {
   app.onError((err, c) => {
     if (err instanceof ZodError) return c.json({ error: err.issues[0]?.message ?? "잘못된 입력입니다." }, 400);
     if (err instanceof InputError) return c.json({ error: err.message }, 400);
+    // orrery(천문 계산)가 입력 때문에 던지는 오류. 사용자가 고칠 수 있는 문제라 400으로 낸다
+    if (err instanceof RangeError && /DST gap/i.test(err.message)) {
+      return c.json({ error: "그 시각은 서머타임이 시작되며 건너뛴 시각이라 존재하지 않습니다. 출생 시각을 확인하세요." }, 400);
+    }
+    if (err instanceof RangeError && /time ?zone/i.test(err.message)) return c.json({ error: "알 수 없는 타임존입니다." }, 400);
+    if (err.name === "InvalidDateTimeError") return c.json({ error: "존재하지 않는 날짜·시각입니다." }, 400);
     console.error(err);
     return c.json({ error: "서버 오류가 발생했습니다." }, 500);
   });
@@ -36,7 +42,7 @@ export function createApp() {
 
   app.post("/normalize", async (c) => {
     const n = normalizeBirth(await body(c.req.raw, BirthInputSchema));
-    return c.json({ birth: { date: n.date, time: n.time ?? null, gender: n.gender, jasiMethod: n.jasiMethod, place: n.place ?? SEOUL } });
+    return c.json({ birth: { date: n.date, time: n.time ?? null, gender: n.gender, jasiMethod: n.jasiMethod, place: n.place ? normalizePlace(n.place) : SEOUL } });
   });
 
   app.get("/places", (c) => {

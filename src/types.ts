@@ -3,13 +3,33 @@
  */
 import { z } from "zod";
 
+/** 한국 영역(제주·울릉도·독도 포함). 이 밖의 좌표는 타임존 없이 계산하면 서울 시간으로 잘못 계산된다 */
+export const inKorea = (lat: number, lon: number) => lat >= 33 && lat <= 39 && lon >= 124 && lon <= 132;
+export const validTimezone = (tz: string) => {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 /** 출생지. 국내 도시는 timezone 생략 가능(Asia/Seoul), 해외는 IANA 타임존 필수 */
-export const PlaceSchema = z.object({
-  name: z.string().trim().min(1).max(60),
-  lat: z.number().min(-90).max(90),
-  lon: z.number().min(-180).max(180),
-  timezone: z.string().min(1).max(64).default("Asia/Seoul"),
-});
+export const PlaceSchema = z
+  .object({
+    name: z.string().trim().min(1).max(60),
+    lat: z.number().min(-90).max(90),
+    lon: z.number().min(-180).max(180),
+    timezone: z.string().min(1).max(64).optional(),
+  })
+  .superRefine((p, ctx) => {
+    if (!p.timezone) {
+      if (!inKorea(p.lat, p.lon)) ctx.addIssue({ code: "custom", message: "해외 출생지는 IANA 타임존(timezone)이 필요합니다." });
+    } else if (!validTimezone(p.timezone)) {
+      ctx.addIssue({ code: "custom", message: `알 수 없는 타임존입니다: ${p.timezone}` });
+    }
+  })
+  .transform((p) => ({ ...p, timezone: p.timezone ?? "Asia/Seoul" }));
 export type Place = z.infer<typeof PlaceSchema>;
 
 export const SEOUL: Place = { name: "서울", lat: 37.5665, lon: 126.978, timezone: "Asia/Seoul" };
@@ -158,6 +178,8 @@ export interface Facts {
   palaces?: Record<string, string[]>;
   /** 점성술: 출생 애스펙트 + 트랜짓 애스펙트 */
   aspects?: { p1: string; p2: string; type: string }[];
+  /** 사주, 시간 미상 + 절입일: 출생 시각에 따라 갈리는 기둥 [00:00 기준, 23:59 기준] */
+  boundaryPillars?: { month?: [string, string]; year?: [string, string] };
 }
 
 // ── POST /compute 응답 ────────────────────────────────────

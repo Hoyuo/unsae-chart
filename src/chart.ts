@@ -8,7 +8,7 @@ import { calculateSaju } from "@orrery/core/saju";
 import { getYearGanzi, getRelation, getJeonggi, getHiddenStems, getTwelveMeteor, analyzePillarRelations } from "@orrery/core/pillars";
 import { STEM_INFO, BRANCH_ELEMENT, ELEMENT_HANJA, SKY, SKY_KR, EARTH, EARTH_KR } from "@orrery/core/constants";
 import type { BirthInput as OrreryInput, SajuResult, DaewoonItem, RelationResult } from "@orrery/core/types";
-import type { BirthInput, ChartView, Element, Facts, SeunView, StrengthView } from "./types.js";
+import { inKorea, type BirthInput, type ChartView, type Element, type Facts, type SeunView, type StrengthView } from "./types.js";
 
 const PILLAR_NAMES = ["시주", "일주", "월주", "년주"];
 const ELEMENTS: Element[] = ["tree", "fire", "earth", "metal", "water"];
@@ -32,9 +32,20 @@ export interface AsOf {
   date: string;
   year: number;
 }
-export const asOfDate = (date = kstToday()): AsOf => ({ date, year: Number(date.slice(0, 4)) });
-
 export class InputError extends Error {}
+
+/** YYYY-MM-DD가 실재하는 날짜이고 지원 범위(1900~2100) 안인지. 어느 체계를 계산하든 같은 검사를 거친다 */
+export function checkDate(date: string, what = "날짜"): void {
+  const [year, month, day] = date.split("-").map(Number) as [number, number, number];
+  const d = new Date(Date.UTC(year, month - 1, day));
+  if (!Number.isFinite(d.getTime()) || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) throw new InputError(`존재하지 않는 ${what}입니다.`);
+  if (year < 1900 || year > 2100) throw new InputError(`${what}는 1900~2100년 사이만 지원합니다.`);
+}
+
+export const asOfDate = (date = kstToday()): AsOf => {
+  checkDate(date, "기준일");
+  return { date, year: Number(date.slice(0, 4)) };
+};
 
 /**
  * 음력 날짜(YYYY-MM-DD) → 양력 날짜. 윤달이면 leap=true.
@@ -53,18 +64,26 @@ export function lunarToSolar(date: string, leap = false): string {
   throw new InputError(`존재하지 않는 음력 날짜입니다${leap ? " (그 해 그 달에는 윤달이 없습니다)" : " (윤달이면 윤달에 체크하세요)"}.`);
 }
 
+/**
+ * 한국 영역 좌표는 타임존 이름과 상관없이 Asia/Seoul로 계산한다. 다른 이름(Asia/Tokyo·Asia/Pyongyang 등)을 넣으면
+ * orrery가 해외로 보고 진태양시 보정을 해 시주·일주가 바뀌고, 자미두수도 해외 경로를 탄다
+ */
+export function normalizePlace<P extends { lat: number; lon: number; timezone: string }>(place: P): P {
+  return inKorea(place.lat, place.lon) && place.timezone !== "Asia/Seoul" ? { ...place, timezone: "Asia/Seoul" } : place;
+}
+
 /** 음력으로 들어온 출생일을 양력으로 바꾼다. 이미 양력이면 그대로 (calendar·leapMonth 필드는 지운다) */
 export function normalizeBirth<T extends { date: string; calendar?: "solar" | "lunar" | undefined; leapMonth?: boolean | undefined }>(b: T): T {
   const { calendar, leapMonth, ...rest } = b;
-  return (calendar === "lunar" ? { ...rest, date: lunarToSolar(b.date, !!leapMonth) } : rest) as unknown as T;
+  const out = (calendar === "lunar" ? { ...rest, date: lunarToSolar(b.date, !!leapMonth) } : rest) as unknown as T;
+  checkDate(out.date); // 사주만이 아니라 자미두수·점성술만 계산할 때도 같은 검사를 거친다
+  return out;
 }
 
 /** zod 검증을 통과한 입력 → orrery 입력 (날짜 실재 여부·범위 확인) */
 export function toOrreryInput(b: BirthInput): OrreryInput {
+  checkDate(b.date);
   const [year, month, day] = b.date.split("-").map(Number) as [number, number, number];
-  const d = new Date(Date.UTC(year, month - 1, day));
-  if (d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) throw new InputError("존재하지 않는 날짜입니다.");
-  if (year < 1900 || year > 2100) throw new InputError("1900~2100년 사이만 지원합니다.");
 
   const unknownTime = !b.time;
   const [hour, minute] = unknownTime ? [0, 0] : (b.time!.split(":").map(Number) as [number, number]);
@@ -76,7 +95,25 @@ export function toOrreryInput(b: BirthInput): OrreryInput {
   };
 }
 
-export const computeSaju = (b: BirthInput) => calculateSaju(toOrreryInput(b));
+/** 시간 미상 + 절입일: 출생 시각에 따라 갈리는 기둥 [00:00 기준, 23:59 기준] */
+export interface PillarBoundary { month?: [string, string]; year?: [string, string] }
+export type SajuComputed = SajuResult & { boundary?: PillarBoundary };
+
+/**
+ * 시간 미상은 orrery가 정오로 계산한다. 그날에 절입(입춘·각 절기) 시각이 있으면 년주·월주가 출생 시각에 따라 갈리므로
+ * 00:00과 23:59로도 계산해 다르면 boundary에 남긴다(해마다 12일꼴). 일주는 자시 경계로 늘 갈릴 수 있어 비교하지 않는다.
+ */
+export function computeSaju(b: BirthInput): SajuComputed {
+  const saju: SajuComputed = calculateSaju(toOrreryInput(b));
+  if (b.time) return saju;
+  const at = (time: string) => calculateSaju(toOrreryInput({ ...b, time, jasiMethod: "split" })).pillars; // 야자시: 날짜를 옮기지 않고 절입만 본다
+  const [early, late] = [at("00:00"), at("23:59")];
+  const differs = (i: number): [string, string] | undefined =>
+    early[i]!.pillar.ganzi !== late[i]!.pillar.ganzi ? [early[i]!.pillar.ganzi, late[i]!.pillar.ganzi] : undefined;
+  const [month, year] = [differs(2), differs(3)];
+  if (month || year) saju.boundary = { ...(month && { month }), ...(year && { year }) };
+  return saju;
+}
 
 // ── 공통 집계 ─────────────────────────────────────────────
 function countElements(saju: SajuResult) {
@@ -291,15 +328,31 @@ function pairRelation(a: string, b: string) {
   return out.length ? out.join(", ") : "없음";
 }
 
-export function describeChart(saju: SajuResult, asOf: AsOf = asOfDate()) {
+/** 기준일이 입춘(2월 3~5일) 전인가. 세운은 양력 연도로 세므로 이때는 사주의 해와 어긋날 수 있다 */
+export const beforeIpchun = (date: string) => {
+  const [, m, d] = date.split("-").map(Number) as [number, number, number];
+  return m === 1 || (m === 2 && d <= 4);
+};
+
+/** 절입일 출생(시간 미상)의 경고 문장. 없으면 null */
+export function boundaryNote(boundary: PillarBoundary | undefined): string | null {
+  if (!boundary) return null;
+  const parts = [boundary.year && `년주 ${boundary.year[0]} 또는 ${boundary.year[1]}`, boundary.month && `월주 ${boundary.month[0]} 또는 ${boundary.month[1]}`].filter(Boolean);
+  return `절입일 출생(시간 미상): ${parts.join(", ")}. 출생 시각에 따라 갈리므로 어느 한쪽으로 확정하지 말고 두 경우를 함께 볼 것 (대운 시작 나이도 달라질 수 있음)`;
+}
+
+export function describeChart(saju: SajuComputed, asOf: AsOf = asOfDate()) {
   const { input, pillars } = saju;
   const dayStem = pillars[1]!.pillar.stem;
+  const note = boundaryNote(saju.boundary);
   const lines: string[] = [
     "[기준]",
     `오늘 ${asOf.date} / 올해 ${asOf.year}년 / 내년 ${asOf.year + 1}년`,
+    ...(beforeIpchun(asOf.date) ? [`올해 간지는 양력 연도 기준. 입춘(2월 4일경) 전이라 사주 세운으로는 아직 ${getYearGanzi(asOf.year - 1)} 해로 볼 수 있음`] : []),
     "",
     "[기본]",
     `성별 ${input.gender === "M" ? "남" : "여"} / 자시법 ${JASI_KO[input.jasiMethod ?? "unified"] ?? "통자시"} / ${input.unknownTime ? "시간 미상" : "출생시간 확인됨"}`,
+    ...(note ? [note] : []),
     "",
     "[원국]",
   ];
@@ -419,7 +472,7 @@ export function chartView(saju: SajuResult, asOf: AsOf = asOfDate()): ChartView 
 }
 
 /** 자동 검사의 정답: 이 명식에 실제로 존재하는 관계·지장간·세운 간지 */
-export function sajuFacts(saju: SajuResult, asOf: AsOf, chartText: string): Facts {
+export function sajuFacts(saju: SajuComputed, asOf: AsOf, chartText: string): Facts {
   const relations: NonNullable<Facts["relations"]> = [];
   const push = (a: string, b: string, rs: RelationResult[]) => rs.forEach((r) => relations.push({ a, b, type: r.type }));
   const between = (g1: string, g2: string) => {
@@ -453,6 +506,7 @@ export function sajuFacts(saju: SajuResult, asOf: AsOf, chartText: string): Fact
     nextYear: asOf.year + 1,
     yearGanzi: { thisYear: years[0]!, nextYear: years[1]! },
     unknownTime: !!saju.input.unknownTime,
+    ...(saju.boundary && { boundaryPillars: saju.boundary }),
     chartText,
     relations,
     looseHap: saju.relations.triple.length + saju.relations.directional.length > 0,

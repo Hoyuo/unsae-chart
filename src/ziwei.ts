@@ -117,9 +117,12 @@ export function computeZiwei(birth: BirthInput, place: Place, asOf: AsOf): Ziwei
   const birthSiHua = palaces.flatMap((p) => p.stars.filter((s) => s.siHua).map((s) => `生年${s.siHua} ${s.name}(${p.name})`));
   lines.push("", "[생년 사화]", birthSiHua.length ? birthSiHua.join(" / ") : "없음");
 
+  // orrery는 첫 대한 전이어도 첫 대한을 현재로 돌려준다(음수 색인을 0으로). 세는 나이가 첫 대한 시작 전이면 현재 대한이 없다
+  const age = asOf.year - chart.lunarYear + 1;
+  const isCurrent = (d: { palaceName: string; ageStart: number }) => d.palaceName === cur.daxianPalaceName && d.ageStart === cur.daxianAgeStart && age >= d.ageStart;
   lines.push("", "[대한]");
   for (const d of daxian) {
-    const isCur = d.palaceName === cur.daxianPalaceName && d.ageStart === cur.daxianAgeStart;
+    const isCur = isCurrent(d);
     lines.push(`${d.ageStart}~${d.ageEnd}세 ${d.palaceName} ${d.ganZhi}${isCur ? " ← 현재" : ""}`);
   }
 
@@ -147,7 +150,7 @@ export function computeZiwei(birth: BirthInput, place: Place, asOf: AsOf): Ziwei
       shenGong: chart.shenGongZhi,
       wuXingJu: chart.wuXingJu.name,
       palaces: palaces.map((p) => ({ name: p.name, ganZhi: p.ganZhi, stars: p.stars, isShenGong: p.isShenGong })),
-      daxian: daxian.map((d) => ({ ...d, current: d.palaceName === cur.daxianPalaceName && d.ageStart === cur.daxianAgeStart })),
+      daxian: daxian.map((d) => ({ ...d, current: isCurrent(d) })),
       liunian: liunian.map(({ info, label }) => ({
         year: info.year,
         label,
